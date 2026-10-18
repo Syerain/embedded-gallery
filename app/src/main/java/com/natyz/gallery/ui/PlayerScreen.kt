@@ -492,7 +492,7 @@ fun VideoPane(path: String, speed: Float, modifier: Modifier = Modifier) {
                 Column(
                     Modifier
                         .align(Alignment.Center)
-                       background(Color(0xB3000000), androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                        .background(Color(0xB3000000), androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
                         .padding(horizontal = 22.dp, vertical = 14.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
