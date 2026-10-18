@@ -1,0 +1,21 @@
+# Gradle / build
+.gradle/
+build/
+app/build/
+local.properties
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Bundled media (regenerate with tools/pack_data.py)
+app/src/main/assets/gallery/media/
+
+# Placeholder dataset & toolchain
+tools/placeholder_out/
+tools/__pycache__/
+
+# OS
+.DS_Store
+Thumbs.db
