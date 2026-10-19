@@ -15,8 +15,10 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.staggeredgrid.LazyVerticalStaggeredGrid
 import androidx.compose.foundation.lazy.staggeredgrid.StaggeredGridCells
+import androidx.compose.foundation.lazy.staggeredgrid.rememberLazyStaggeredGridState
 import androidx.compose.foundation.lazy.staggeredgrid.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -48,6 +50,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
+import androidx.compose.ui.platform.LocalContext
 import com.natyz.gallery.AppViewModel
 import com.natyz.gallery.data.Gallery
 import com.natyz.gallery.data.MediaType
@@ -94,25 +98,35 @@ fun HomeScreen(vm: AppViewModel, onOpen: (Gallery) -> Unit, onSettings: () -> Un
             return@Scaffold
         }
         if (ui.viewMode == "waterfall") {
-            LazyVerticalStaggeredGrid(
-                columns = StaggeredGridCells.Fixed(2),
-                modifier = Modifier.fillMaxSize().padding(pad),
-                contentPadding = PaddingValues(8.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalItemSpacing = 8.dp
-            ) {
-                items(list, key = { it.id }) { g ->
-                    GalleryCard(g, vm.titleOf(g, ui), onClick = { onOpen(g) })
+            val gridState = rememberLazyStaggeredGridState()
+            Box(Modifier.fillMaxSize().padding(pad)) {
+                LazyVerticalStaggeredGrid(
+                    columns = StaggeredGridCells.Fixed(2),
+                    state = gridState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(8.dp),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalItemSpacing = 8.dp
+                ) {
+                    items(list, key = { it.id }) { g ->
+                        GalleryCard(g, vm.titleOf(g, ui), onClick = { onOpen(g) })
+                    }
                 }
+                ScrollRail(state = gridState, modifier = Modifier.align(Alignment.CenterEnd))
             }
         } else {
-            LazyColumn(
-                modifier = Modifier.fillMaxSize().padding(pad),
-                contentPadding = PaddingValues(vertical = 4.dp)
-            ) {
-                items(list, key = { it.id }) { g ->
-                    GalleryRow(g, vm.titleOf(g, ui), onClick = { onOpen(g) })
+            val listState = rememberLazyListState()
+            Box(Modifier.fillMaxSize().padding(pad)) {
+                LazyColumn(
+                    state = listState,
+                    modifier = Modifier.fillMaxSize(),
+                    contentPadding = PaddingValues(vertical = 4.dp)
+                ) {
+                    items(list, key = { it.id }) { g ->
+                        GalleryRow(g, vm.titleOf(g, ui), onClick = { onOpen(g) })
+                    }
                 }
+                ScrollRail(state = listState, modifier = Modifier.align(Alignment.CenterEnd))
             }
         }
     }
@@ -121,10 +135,15 @@ fun HomeScreen(vm: AppViewModel, onOpen: (Gallery) -> Unit, onSettings: () -> Un
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 private fun GalleryCard(g: Gallery, title: String, onClick: () -> Unit) {
+    val ctx = LocalContext.current
     Card(onClick = onClick, modifier = Modifier.fillMaxWidth()) {
         Box {
             AsyncImage(
-                model = "file:///android_asset/${g.cover}",
+                model = ImageRequest.Builder(ctx)
+                    .data("file:///android_asset/${g.cover}")
+                    .size(720)
+                    .crossfade(false)
+                    .build(),
                 contentDescription = title,
                 contentScale = ContentScale.Crop,
                 modifier = Modifier
@@ -172,6 +191,7 @@ private fun GalleryCard(g: Gallery, title: String, onClick: () -> Unit) {
 
 @Composable
 private fun GalleryRow(g: Gallery, title: String, onClick: () -> Unit) {
+    val ctx = LocalContext.current
     Row(
         modifier = Modifier
             .fillMaxWidth()
@@ -180,7 +200,11 @@ private fun GalleryRow(g: Gallery, title: String, onClick: () -> Unit) {
         verticalAlignment = Alignment.CenterVertically
     ) {
         AsyncImage(
-            model = "file:///android_asset/${g.cover}",
+            model = ImageRequest.Builder(ctx)
+                .data("file:///android_asset/${g.cover}")
+                .size(480)
+                .crossfade(false)
+                .build(),
             contentDescription = title,
             contentScale = ContentScale.Crop,
             modifier = Modifier

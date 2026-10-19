@@ -67,6 +67,7 @@ import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import coil.compose.AsyncImage
+import coil.request.ImageRequest
 import com.natyz.gallery.AppViewModel
 import com.natyz.gallery.data.GalleryItem
 import com.natyz.gallery.data.MediaType
@@ -241,36 +242,39 @@ fun GalleryScreen(
             )
         }
     ) { pad ->
-        LazyVerticalGrid(
-            columns = GridCells.Adaptive(minSize = 110.dp),
-            state = gridState,
-            modifier = Modifier.fillMaxSize().padding(pad),
-            contentPadding = PaddingValues(6.dp),
-            horizontalArrangement = Arrangement.spacedBy(6.dp),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-            itemsIndexed(list, key = { _, it -> it.id }) { idx, item ->
-                Tile(
-                    item = item,
-                    index = idx,
-                    fav = vm.isItemFav(gid, item.id, ui),
-                    reorder = reorderMode,
-                    draggingNow = dragging.value == idx,
-                    offset = dragOffset.value,
-                    onClick = { if (!reorderMode) onPlay(idx) },
-                    onLongClick = { if (!reorderMode) vm.toggleItemFav(gid, item.id) },
-                    onDragStart = {
-                        dragging.value = idx
-                        dragOffset.value = Offset.Zero
-                    },
-                    onDrag = { a, p -> handleDrag(idx, a, p) },
-                    onDragEnd = {
-                        dragging.value = -1
-                        dragOffset.value = Offset.Zero
-                        saveOrder()
-                    }
-                )
+        Box(Modifier.fillMaxSize().padding(pad)) {
+            LazyVerticalGrid(
+                columns = GridCells.Adaptive(minSize = 110.dp),
+                state = gridState,
+                modifier = Modifier.fillMaxSize(),
+                contentPadding = PaddingValues(6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(6.dp)
+            ) {
+                itemsIndexed(list, key = { _, it -> it.id }) { idx, item ->
+                    Tile(
+                        item = item,
+                        index = idx,
+                        fav = vm.isItemFav(gid, item.id, ui),
+                        reorder = reorderMode,
+                        draggingNow = dragging.value == idx,
+                        offset = dragOffset.value,
+                        onClick = { if (!reorderMode) onPlay(idx) },
+                        onLongClick = { if (!reorderMode) vm.toggleItemFav(gid, item.id) },
+                        onDragStart = {
+                            dragging.value = idx
+                            dragOffset.value = Offset.Zero
+                        },
+                        onDrag = { a, p -> handleDrag(idx, a, p) },
+                        onDragEnd = {
+                            dragging.value = -1
+                            dragOffset.value = Offset.Zero
+                            saveOrder()
+                        }
+                    )
+                }
             }
+            ScrollRail(state = gridState, modifier = Modifier.align(Alignment.CenterEnd))
         }
     }
 
@@ -299,6 +303,7 @@ private fun Tile(
     onDragEnd: () -> Unit
 ) {
     val haptic = LocalHapticFeedback.current
+    val ctx = LocalContext.current
     val currentDrag by rememberUpdatedState(onDrag)
     val currentStart by rememberUpdatedState(onDragStart)
     val currentEnd by rememberUpdatedState(onDragEnd)
@@ -341,7 +346,11 @@ private fun Tile(
             }
     ) {
         AsyncImage(
-            model = "file:///android_asset/${item.listPath}",
+            model = ImageRequest.Builder(ctx)
+                .data("file:///android_asset/${item.listPath}")
+                .size(480)
+                .crossfade(false)
+                .build(),
             contentDescription = item.title,
             contentScale = ContentScale.Crop,
             modifier = Modifier.fillMaxSize()

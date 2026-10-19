@@ -29,6 +29,12 @@ class MainActivity : ComponentActivity(), ImageLoaderFactory {
         }
     }
 
+    override fun onResume() {
+        super.onResume()
+        // re-assert on every resume; some OEM shells reset the preferred mode
+        preferHighRefreshRate()
+    }
+
     /** High-refresh displays (e.g. 120Hz originOS): prefer the fastest mode. */
     private fun preferHighRefreshRate() {
         runCatching {
@@ -44,6 +50,7 @@ class MainActivity : ComponentActivity(), ImageLoaderFactory {
                     .maxByOrNull { it.refreshRate } ?: return
                 window.attributes = window.attributes.apply {
                     preferredDisplayModeId = best.modeId
+                    preferredRefreshRate = best.refreshRate
                 }
             }
         }

@@ -12,8 +12,8 @@ android {
         applicationId = "com.natyz.gallery"
         minSdk = 26
         targetSdk = 34
-        versionCode = 2
-        versionName = "1.2"
+        versionCode = 3
+        versionName = "1.3"
     }
 
     buildTypes {

@@ -9,9 +9,12 @@ import android.hardware.Sensor
 import android.hardware.SensorEvent
 import android.hardware.SensorEventListener
 import android.hardware.SensorManager
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.VectorConverter
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
@@ -30,6 +33,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.horizontalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.foundation.pager.HorizontalPager
@@ -45,9 +49,11 @@ import androidx.compose.material3.FilterChip
 import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Slider
 import androidx.compose.material3.SliderDefaults
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
@@ -74,6 +80,8 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.media3.common.MediaItem
 import androidx.media3.common.Player
 import androidx.media3.exoplayer.ExoPlayer
@@ -114,8 +122,19 @@ fun PlayerScreen(
     var speed by remember { mutableFloatStateOf(1f) }
     val current = items.getOrNull(pager.currentPage)
 
+    // free-rotate highlight banner at the top
+    var freeRotateBanner by remember { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(freeRotateBanner) {
+        if (freeRotateBanner != null) {
+            delay(1800)
+            freeRotateBanner = null
+        }
+    }
+
     // lock orientation once per viewing session based on gyro/rotation-vector
     OrientationOnceLock()
+    // immersive fullscreen: hide status bar, pure black background (OLED)
+    ImmersiveFullscreen()
 
     Scaffold(
         containerColor = Color.Black,
@@ -151,21 +170,62 @@ fun PlayerScreen(
             }
         }
     ) { pad ->
-        HorizontalPager(
-            state = pager,
-            modifier = Modifier.fillMaxSize().padding(pad)
-        ) { page ->
-            val item = items[page]
-            if (item.type == MediaType.IMAGE) {
-                ZoomableImage(
-                    path = item.path,
-                    aspect = item.aspect,
-                    animSpeed = ui.animSpeed,
-                    modifier = Modifier.fillMaxSize().background(Color.Black)
-                )
-            } else {
-                VideoPane(path = item.path, speed = speed, modifier = Modifier.fillMaxSize())
+        Box(Modifier.fillMaxSize().padding(pad)) {
+            HorizontalPager(
+                state = pager,
+                modifier = Modifier.fillMaxSize()
+            ) { page ->
+                val item = items[page]
+                if (item.type == MediaType.IMAGE) {
+                    ZoomableImage(
+                        path = item.path,
+                        aspect = item.aspect,
+                        animSpeed = ui.animSpeed,
+                        onFreeRotate = { freeRotateBanner = it },
+                        modifier = Modifier.fillMaxSize().background(Color.Black)
+                    )
+                } else {
+                    VideoPane(path = item.path, speed = speed, modifier = Modifier.fillMaxSize())
+                }
             }
+            freeRotateBanner?.let { on ->
+                AnimatedVisibility(
+                    visible = true,
+                    enter = fadeIn(tween(150)),
+                    exit = fadeOut(tween(300)),
+                    modifier = Modifier.align(Alignment.TopCenter)
+                ) {
+                    Surface(
+                        color = if (on) MaterialTheme.colorScheme.primary else Color(0xE6202020),
+                        shape = RoundedCornerShape(20.dp)
+                    ) {
+                        Text(
+                            if (on) "自由旋转已开启 · 长按恢复吸附"
+                            else "已恢复 90° 吸附",
+                            color = Color.White,
+                            style = MaterialTheme.typography.labelLarge,
+                            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+/** Hide the status/navigation bars while viewing; restore on leave. */
+@Composable
+private fun ImmersiveFullscreen() {
+    val context = LocalContext.current
+    DisposableEffect(Unit) {
+        val window = (context as? Activity)?.window
+        val controller = window?.let { WindowCompat.getInsetsController(it, it.decorView) }
+        controller?.hide(WindowInsetsCompat.Type.statusBars())
+        controller?.systemBarsBehavior =
+            androidx.core.view.WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+        onDispose {
+            controller?.show(WindowInsetsCompat.Type.statusBars())
+            controller?.show(WindowInsetsCompat.Type.navigationBars())
         }
     }
 }
@@ -239,22 +299,31 @@ private fun SpeedBar(speed: Float, onSelect: (Float) -> Unit) {
 private fun formatSpeed(s: Float): String = if (s == s.toInt().toFloat()) "${s.toInt()}.0x" else "${s}x"
 
 /**
- * Image viewer with:
- *  - discrete rotation (0/90/180/270) with snapping by default
- *  - long-press toggles free-rotation mode (no snapping); long-press again
- *    returns to discrete mode and snaps to the nearest 90° step
- *  - adaptive fill: at 90°/270° the image scales up to fill the viewport
- *  - pinch zoom / pan (pan only when zoomed in so horizontal swipes keep
- *    working for prev/next paging), scale snap-back near 1x
- *  - double tap toggles between 1x and 2.5x
+ * Image viewer:
+ *  - two-finger rotation follows the finger live; on release it snaps to the
+ *    nearest 90° step (0/90/180/270) with a haptic tick at each 90° crossing
+ *  - long-press toggles free rotation (no snapping, reported via banner
+ *    callback); long-press again re-enables snapping
+ *  - adaptive fill: at 90°/270° the image scales to fill the viewport
+ *  - pinch zoom; pan only when zoomed so horizontal swipes page prev/next
+ *  - the image can never stay smaller than the screen: releasing below fit
+ *    size animates back to the adaptive fullscreen state
+ *  - double tap: if zoomed/rotated/panned, reset to default fullscreen;
+ *    otherwise zoom to 2.5x
  */
 @Composable
-fun ZoomableImage(path: String, aspect: Float, animSpeed: Float, modifier: Modifier = Modifier) {
+fun ZoomableImage(
+    path: String,
+    aspect: Float,
+    animSpeed: Float,
+    onFreeRotate: (Boolean) -> Unit = {},
+    modifier: Modifier = Modifier
+) {
     val scope = rememberCoroutineScope()
     val haptic = LocalHapticFeedback.current
     val scale = remember { Animatable(1f) }
     val offset = remember { Animatable(Offset.Zero, Offset.VectorConverter) }
-    val rotation = remember { Animatable(0f) }          // actual displayed angle
+    val rotation = remember { Animatable(0f) }          // displayed angle
     val rotIndex = remember { mutableIntStateOf(0) }    // discrete step 0..3
     val freeRotate = remember { mutableStateOf(false) }
     val fill = remember { Animatable(1f) }              // adaptive fill factor
@@ -263,7 +332,6 @@ fun ZoomableImage(path: String, aspect: Float, animSpeed: Float, modifier: Modif
     BoxWithConstraints(modifier = modifier, contentAlignment = Alignment.Center) {
         val cw = constraints.maxWidth.toFloat()
         val ch = constraints.maxHeight.toFloat()
-        // ContentScale.Fit size of the image inside this box
         val containerAspect = if (ch > 0) cw / ch else 0.75f
         val fitW: Float
         val fitH: Float
@@ -272,10 +340,9 @@ fun ZoomableImage(path: String, aspect: Float, animSpeed: Float, modifier: Modif
         } else {
             fitH = ch; fitW = ch * aspect
         }
-        // fill factor needed to cover the box after a 90° rotation
         val rotFill = if (fitH > 0 && fitW > 0) max(cw / fitH, ch / fitW) else 1f
 
-        fun animateToTargets(tRot: Float, tFill: Float, tScale: Float, tOff: Offset) {
+        fun animateTo(tRot: Float, tFill: Float, tScale: Float, tOff: Offset) {
             scope.launch {
                 launch { rotation.animateTo(tRot, tween(dur(140))) }
                 launch { fill.animateTo(tFill, tween(dur(140))) }
@@ -300,61 +367,49 @@ fun ZoomableImage(path: String, aspect: Float, animSpeed: Float, modifier: Modif
                 }
                 .pointerInput(path, freeRotate.value) {
                     awaitEachGesture {
-                        var rotAccum = 0f
+                        val baseRot = rotation.value
+                        var accum = 0f
+                        var lastStep = 0
                         while (true) {
                             val event = awaitPointerEvent()
                             val zm = event.calculateZoom()
                             val pan = event.calculatePan()
                             val rot = event.calculateRotation()
-                            val canPan = scale.value > 1.05f
+                            val canPan = scale.value * fill.value > 1.02f
                             if (zm != 1f || rot != 0f || (pan != Offset.Zero && canPan)) {
-                                val ns = (scale.value * zm).coerceIn(0.3f, 10f)
+                                val ns = (scale.value * zm).coerceIn(0.25f, 10f)
+                                accum += rot
+                                // live rotation feedback; discrete mode still
+                                // tracks the finger but snaps on release
+                                val step = (accum / 90f).toInt()
+                                if (!freeRotate.value && step != lastStep) {
+                                    lastStep = step
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                }
                                 scope.launch {
                                     scale.snapTo(ns)
                                     if (canPan) offset.snapTo(offset.value + pan)
-                                    if (freeRotate.value) {
-                                        // free rotation: continuous, no snap
-                                        rotation.snapTo(rotation.value + rot)
-                                    } else if (rot != 0f) {
-                                        // discrete rotation: step 90° per threshold
-                                        rotAccum += rot
-                                        if (rotAccum > 40f) {
-                                            rotIndex.value = (rotIndex.value + 1) % 4
-                                            rotAccum = 0f
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            launch {
-                                                rotation.animateTo(rotIndex.value * 90f, tween(dur(140)))
-                                                fill.animateTo(
-                                                    if (rotIndex.value % 2 == 1) rotFill else 1f,
-                                                    tween(dur(140))
-                                                )
-                                            }
-                                        } else if (rotAccum < -40f) {
-                                            rotIndex.value = (rotIndex.value + 3) % 4
-                                            rotAccum = 0f
-                                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                            launch {
-                                                rotation.animateTo(rotIndex.value * 90f, tween(dur(140)))
-                                                fill.animateTo(
-                                                    if (rotIndex.value % 2 == 1) rotFill else 1f,
-                                                    tween(dur(140))
-                                                )
-                                            }
-                                        }
-                                    }
+                                    rotation.snapTo(baseRot + accum)
                                 }
                                 event.changes.forEach { it.consume() }
                             }
                             if (event.changes.all { !it.pressed }) break
                         }
-                        // gesture end: snap scale back near 1x (rotation already discrete)
-                        if (!freeRotate.value && abs(scale.value - 1f) < 0.15f) {
-                            animateToTargets(
+                        // ---- release: snap / restore ----
+                        val endRot = baseRot + accum
+                        val below = scale.value * fill.value < 1.02f
+                        if (!freeRotate.value) {
+                            val nearest = (endRot / 90f).roundToInt()
+                            rotIndex.value = ((nearest % 4) + 4) % 4
+                            animateTo(
                                 rotIndex.value * 90f,
                                 if (rotIndex.value % 2 == 1) rotFill else 1f,
-                                1f,
-                                Offset.Zero
+                                if (below) 1f else scale.value,
+                                if (below) Offset.Zero else offset.value
                             )
+                        } else if (below) {
+                            // never keep it smaller than the screen
+                            animateTo(endRot, fill.value, 1f, Offset.Zero)
                         }
                     }
                 }
@@ -363,11 +418,11 @@ fun ZoomableImage(path: String, aspect: Float, animSpeed: Float, modifier: Modif
                         onLongPress = {
                             haptic.performHapticFeedback(HapticFeedbackType.LongPress)
                             if (freeRotate.value) {
-                                // exit free mode: snap to nearest 90°
                                 freeRotate.value = false
+                                onFreeRotate(false)
                                 val nearest = (rotation.value / 90f).roundToInt()
                                 rotIndex.value = ((nearest % 4) + 4) % 4
-                                animateToTargets(
+                                animateTo(
                                     rotIndex.value * 90f,
                                     if (rotIndex.value % 2 == 1) rotFill else 1f,
                                     scale.value,
@@ -375,16 +430,19 @@ fun ZoomableImage(path: String, aspect: Float, animSpeed: Float, modifier: Modif
                                 )
                             } else {
                                 freeRotate.value = true
+                                onFreeRotate(true)
                             }
                         },
                         onDoubleTap = {
-                            scope.launch {
-                                if (scale.value > 1.4f) {
-                                    scale.animateTo(1f, tween(dur(100)))
-                                    offset.animateTo(Offset.Zero, tween(dur(100)))
-                                } else {
-                                    scale.animateTo(2.5f, tween(dur(100)))
-                                }
+                            val isDefault = abs(scale.value - 1f) < 0.02f &&
+                                offset.value == Offset.Zero &&
+                                abs(rotation.value) < 0.5f &&
+                                abs(fill.value - 1f) < 0.02f
+                            if (isDefault) {
+                                scope.launch { scale.animateTo(2.5f, tween(dur(100))) }
+                            } else {
+                                rotIndex.value = 0
+                                animateTo(0f, 1f, 1f, Offset.Zero)
                             }
                         }
                     )
@@ -492,7 +550,7 @@ fun VideoPane(path: String, speed: Float, modifier: Modifier = Modifier) {
                 Column(
                     Modifier
                         .align(Alignment.Center)
-                        .background(Color(0xB3000000), androidx.compose.foundation.shape.RoundedCornerShape(14.dp))
+                        .background(Color(0xB3000000), RoundedCornerShape(14.dp))
                         .padding(horizontal = 22.dp, vertical = 14.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
                 ) {
